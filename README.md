@@ -22,7 +22,7 @@ Nombres, cédulas, clientes y proveedores son **inventados**. Los calibres y pes
 
 ## Qué incluye
 
-Ingreso con bloqueo por intentos fallidos, cierre por inactividad y cambio rápido de usuario; primer ingreso con aceptación de términos y cambio de clave; usuarios, roles y permisos; turnos por rol con simulador; aprobación de turnos; maestros (clientes, calibres, máquinas, proveedores, colores, tipos de material y productos); anulación y corrección con reversión de inventario; bitácora, auditoría y exportación a Excel; estaciones y parámetros.
+Ingreso con bloqueo por intentos fallidos, cierre por inactividad y cambio rápido de usuario; recuperación de clave a través del Administrador (la persona pide ayuda desde el ingreso y el Administrador restablece la clave a la cédula); primer ingreso con aceptación de términos y cambio de clave; usuarios, roles y permisos; turnos por rol con simulador; aprobación de turnos; maestros (clientes, calibres, máquinas, proveedores, colores, tipos de material y productos); anulación y corrección con reversión de inventario; bitácora, auditoría y exportación a Excel; estaciones y parámetros.
 
 La página **Acerca del demo** relaciona cada historia de usuario (HU-M0-001 a HU-M0-036) con la pantalla donde se ve.
 

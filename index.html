@@ -391,7 +391,7 @@ const FUNCIONES = [
   ]],
   ['Administración', [
     ['admin_usuarios','Crear y desactivar usuarios'], ['asignar_roles','Asignar y quitar roles'],
-    ['admin_maestros','Administrar maestros y turnos'], ['publicar_terminos','Publicar términos y política; consultar aceptaciones']
+    ['admin_maestros','Administrar maestros y turnos'], ['publicar_terminos','Publicar términos y política; consultar aceptaciones'], ['atender_recuperacion','Atender solicitudes de recuperación y restablecer claves']
   ]],
   ['Consulta', [
     ['cons_gestion','Consultar gestión de otros módulos'], ['cons_trazabilidad','Consultar trazabilidad'],
@@ -445,7 +445,7 @@ function seed(){
   P('acc_despacho',{recepcion:'pd',despacho:'si',admin:'si'}); P('acc_devoluciones',{recepcion:'si',admin:'si'});
   P('acc_recuperacion',{recuperacion:'si',admin:'si'}); P('acc_pedidos',{admin:'si'});
   P('aprobar_turno',{admin:'si'}); P('editar_aprobado',{admin:'si'}); P('anular_corregir',{admin:'si'}); P('corregir_peso',{admin:'si'});
-  P('admin_usuarios',{admin:'si'}); P('asignar_roles',{admin:'si'}); P('admin_maestros',{admin:'si'}); P('publicar_terminos',{admin:'si'});
+  P('admin_usuarios',{admin:'si'}); P('asignar_roles',{admin:'si'}); P('admin_maestros',{admin:'si'}); P('publicar_terminos',{admin:'si'}); P('atender_recuperacion',{admin:'si'});
   P('cons_gestion',{admin:'si'}); P('cons_trazabilidad',{admin:'si',consulta:'si'}); P('cons_reportes',{admin:'si',consulta:'si'}); P('cons_bitacora',{admin:'si'});
   const T = (id,rol,nombre,inicio,fin,ej) => ({id,rol,nombre,inicio,fin,estado:'activo',ejemplo:!!ej});
   const turnos = [
@@ -496,6 +496,7 @@ function seed(){
   const aceptaciones = [A('lmendez',2026,10,16,7,58,'Oficina'),A('jramirez',2026,10,16,6,58,'Perfilado'),A('nsuarez',2026,10,16,7,40,'Báscula y despacho'),A('mgomez',2026,10,16,17,55,'Extrusión'),A('alozano',2026,10,16,18,2,'Extrusión'),A('rvargas',2026,10,16,17,30,'Oficina')];
   const B = (ts,usuario,estacion,modulo,accion,detalle) => ({ts,usuario,estacion,modulo,accion,detalle});
   const bitacora = [
+    B(bog(2026,10,18,22,40),'mgomez','Extrusión','Seguridad','Solicitud de recuperación de clave','Aviso al Administrador por correo y en su panel (simulado)'),
     B(bog(2026,10,17,16,40),'lmendez','Oficina','Seguridad','Inicio de sesión','Ingreso desde Oficina'),
     B(bog(2026,10,17,15,26),'jramirez','Perfilado','Perfilado (M3)','Registro de perfilado','PF-0001931 · rollo 0100000002011 (ejemplo)'),
     B(bog(2026,10,17,13,52),'jramirez','Perfilado','Seguridad','Inicio de sesión','Ingreso desde Perfilado'),
@@ -521,13 +522,17 @@ function seed(){
   return {v:1, seq:100, params:{intentos:5,bloqueoMin:15,inactividadMin:15,toleranciaMin:30},
     estaciones:[{id:'oficina',nombre:'Oficina'},{id:'perfilado',nombre:'Perfilado'},{id:'bascula',nombre:'Báscula y despacho'},{id:'extrusion',nombre:'Extrusión'}],
     terminal:'oficina', usuarios, permisos, turnos, aprobacion:{Recepción:false,Extrusión:true,Perfilado:true,Despacho:false,Recuperación:false},
-    consolidados, maestros, registros, movimientos, docs, docsHist, aceptaciones, bitacora, auditoria, intentos:{}, session:null};
+    consolidados, maestros, registros, movimientos, docs, docsHist, aceptaciones, bitacora, auditoria, intentos:{}, session:null,
+    solicitudes:[{id:'s1', usuario:'mgomez', estacion:'Extrusión', ts:bog(2026,10,18,22,40), estado:'pendiente'}], recupLog:[]};
 }
 
 /* ---------- estado ---------- */
 let S = null;
 try { S = JSON.parse(localStorage.getItem(KEY)); } catch(e){ S = null; }
 if(!S || S.v !== 1) S = seed();
+if(!S.solicitudes) S.solicitudes = [];
+if(!S.recupLog) S.recupLog = [];
+if(!S.permisos.atender_recuperacion){ S.permisos.atender_recuperacion = {}; for(const r of ROLES) S.permisos.atender_recuperacion[r.id] = r.id==='admin' ? 'si' : 'no'; }
 let saveT = 0;
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e){} }
 const ui = { route: (location.hash||'').slice(1) || 'inicio', msg:null, pending:null, modal:null, f:{}, tabM:'clientes', tabA:'pendientes', menu:false, err:{} };
@@ -732,9 +737,10 @@ const allowed = r => { for(const [,items] of NAV) for(const it of items) if(it[0
 function vShell(){
   const u = me();
   const pendAprob = S.consolidados.filter(c => c.estado==='pendiente' && S.aprobacion[c.proceso]).length;
+  const pendSol = can('atender_recuperacion') ? S.solicitudes.filter(x => x.estado==='pendiente').length : 0;
   const nav = NAV.map(([sec,items]) => {
     const vis = items.filter(it => !it[3] || canAny(it[3])); if(!vis.length) return '';
-    return (sec ? `<div class="nav-sec">${sec}</div>` : '') + vis.map(([r,t,i,,m]) => `<a href="#${r}" ${ui.route===r?'aria-current="page"':''}>${ic(i)}<span>${t}</span>${r==='aprobacion'&&pendAprob?`<span class="cnt">${pendAprob}</span>`:(m?`<span class="m">${m}</span>`:'')}</a>`).join('');
+    return (sec ? `<div class="nav-sec">${sec}</div>` : '') + vis.map(([r,t,i,,m]) => `<a href="#${r}" ${ui.route===r?'aria-current="page"':''}>${ic(i)}<span>${t}</span>${r==='aprobacion'&&pendAprob?`<span class="cnt">${pendAprob}</span>`:(r==='usuarios'&&pendSol?`<span class="cnt">${pendSol}</span>`:(m?`<span class="m">${m}</span>`:''))}</a>`).join('');
   }).join('');
   const turnos = u.roles.map(r => { const t = turnoDe(r, Date.now()); return S.turnos.some(x => x.rol===r) ? `<span class="ctx" title="Turno asignado por la hora y el rol">${ic('clock')}${esc(rolNom(r))}: <b>${t ? esc(turnoTxt(t.turno))+' · '+fmtYmd(t.fecha) : 'fuera de turno'}</b></span>` : ''; }).join('');
   return `<div class="shell">
@@ -771,14 +777,14 @@ function vInicio(){
     const pendA = S.consolidados.filter(c => c.estado==='pendiente' && S.aprobacion[c.proceso]).length;
     const pendT = S.usuarios.filter(x => x.estado==='activo' && !accAlDia(x.usuario)).length;
     const bloq = S.usuarios.filter(x => lockOf(x.usuario).length).length;
-    const act = S.usuarios.filter(x => x.estado==='activo').length;
+    const sol = S.solicitudes.filter(x => x.estado==='pendiente').length;
     const feed = S.bitacora.slice(0,9).map(b => `<li><time>${fmtTs(b.ts)}</time><span><b>${esc(b.accion)}</b> · ${esc(b.detalle)}</span><span class="who2">${esc(nameOf(b.usuario))} · ${esc(b.estacion)} · ${esc(b.modulo)}</span></li>`).join('');
     return ph('Inicio', [], `Hola, ${esc(u.nombre.split(' ')[0])}. Esto es lo que necesita su atención en el sistema.`) + `
       <div class="kpis">
         <button class="kpi ${pendA?'alert':''}" data-act="go" data-r="aprobacion"><b>${pendA}</b><span>Turnos por aprobar</span></button>
         <button class="kpi ${pendT?'alert':''}" data-act="go" data-r="terminos"><b>${pendT}</b><span>Usuarios sin aceptar los términos vigentes</span></button>
         <button class="kpi ${bloq?'alert':''}" data-act="go" data-r="usuarios"><b>${bloq}</b><span>Usuarios bloqueados por intentos</span></button>
-        <button class="kpi" data-act="go" data-r="usuarios"><b>${act}</b><span>Usuarios activos</span></button>
+        <button class="kpi ${sol?'alert':''}" data-act="go" data-r="usuarios"><b>${sol}</b><span>Solicitudes de recuperación de clave</span></button>
       </div>
       <div class="cols">
         <section class="card"><div class="card-h"><h2 class="h2">Actividad reciente</h2><a href="#bitacora" class="link">Ver la bitácora</a></div><ul class="feed">${feed}</ul></section>
@@ -845,10 +851,19 @@ function vUsuarios(){
     return `<tr><td><b>${esc(fullName(u))}</b><span class="sub mono">${esc(u.usuario)}</span></td><td class="num">${cedula(u.cedula)}<span class="sub">${esc(u.correo||'Sin correo')}</span></td><td><div class="chips">${u.roles.map(r => `<span class="pill">${esc(rolNom(r))}</span>`).join('')}</div></td><td>${estado}</td><td>${ok ? `<span class="pill ok">Al día</span><span class="sub">v${esc(acc.politica)} · ${fmtTs(acc.ts)}</span>` : `<span class="pill warn">Pendiente</span>${acc?`<span class="sub">Aceptó v${esc(acc.politica)}</span>`:''}`}</td><td class="num">${fmtTs(u.ultimo)}</td><td class="acts-cell"><div class="acts">${acts}</div></td></tr>`;
   }).join('');
   return ph('Usuarios', ['HU-M0-002','HU-M0-003','HU-M0-034'], 'Cada persona tiene su propio usuario. Un usuario con movimientos nunca se borra: se desactiva y sus registros siguen a su nombre.', `<button class="btn primary" data-act="modal" data-m="usuario">${ic('plus')}Nuevo usuario</button>`) + `
+    ${vSolicitudes()}
     <div class="toolbar"><label class="field"><span>Buscar</span><input class="input" id="f-uq" data-f="uq" value="${esc(ui.f.uq||'')}" placeholder="Nombre, usuario o cédula"></label>
       <label class="field"><span>Estado</span><select class="input" id="f-ue" data-f="ue"><option value="activo" ${est==='activo'?'selected':''}>Activos</option><option value="inactivo" ${est==='inactivo'?'selected':''}>Inactivos</option><option value="todos" ${est==='todos'?'selected':''}>Todos</option></select></label></div>
     <div class="tbl-wrap"><table class="t"><thead><tr><th>Nombre</th><th>Cédula y correo</th><th>Roles</th><th>Estado</th><th>Términos</th><th>Último ingreso</th><th class="n">Acciones</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty">No hay usuarios con ese filtro.</td></tr>'}</tbody></table></div>
-    <p class="fine">La clave inicial de un usuario nuevo es su cédula. En el primer ingreso acepta los términos y cambia la clave. Si no tiene correo, el Administrador restablece la clave. La cédula solo la ve el Administrador.</p>`;
+    <p class="fine">La clave inicial de un usuario nuevo es su cédula. En el primer ingreso acepta los términos y cambia la clave. Si alguien olvida su clave, la pide desde el ingreso y el Administrador la restablece a la cédula. La cédula solo la ve el Administrador.</p>`;
+}
+function vSolicitudes(){
+  if(!can('atender_recuperacion')) return '';
+  const pend = S.solicitudes.filter(x => x.estado==='pendiente');
+  const rows = pend.map(x => { const u = userBy(x.usuario); return `<tr><td><b>${esc(u ? fullName(u) : x.usuario)}</b><span class="sub mono">${esc(x.usuario)}</span></td><td>${esc(x.estacion)}</td><td class="num">${fmtTs(x.ts)}${x.veces>1 ? `<span class="sub">${x.veces} avisos</span>` : ''}</td><td class="acts-cell"><div class="acts">${u ? `<button class="btn sm primary" data-act="modal" data-m="reset" data-id="${u.id}">Restablecer a la cédula</button>` : ''}<button class="btn sm" data-act="descartarSol" data-s="${x.id}">Descartar</button></div></td></tr>`; }).join('');
+  return `<section class="card" id="solicitudes"><div class="card-h"><h2 class="h2">Solicitudes de recuperación de clave</h2><span class="pill ${pend.length ? 'warn' : 'ok'}">${pend.length} pendiente${pend.length===1 ? '' : 's'}</span></div><div class="card-b stack">
+    ${pend.length ? `<div class="tbl-wrap"><table class="t"><thead><tr><th>Persona</th><th>Estación</th><th>Solicitada</th><th class="n">Acciones</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">No hay solicitudes pendientes.</p>'}
+    <p class="fine">Cada solicitud llega por correo a los Administradores y queda aquí. Verifique la identidad de la persona antes de restablecer: la clave vuelve a ser la cédula y debe cambiarla en su siguiente ingreso.</p></div></section>`;
 }
 
 /* Roles y permisos (HU-M0-003) */
@@ -1060,7 +1075,7 @@ function vDemo(){
     ['HU-M0-022','Validación de registros','Fase 2: no se construye en M0',''],
     ['HU-M0-030','Anular o corregir con motivo','Anular o corregir','anular'],
     ['HU-M0-032','Bitácora de actividad por estación','Bitácora; Estaciones y parámetros','bitacora'],
-    ['HU-M0-034','Clave propia, bloqueo, inactividad y cambio rápido de usuario','Ingreso; barra superior; Estaciones y parámetros','estaciones'],
+    ['HU-M0-034','Clave propia, bloqueo, recuperación a través del Administrador, inactividad y cambio rápido de usuario','Ingreso; Usuarios (solicitudes); barra superior; Estaciones y parámetros','usuarios'],
     ['HU-M0-035','Proveedores, colores, tipos de material y productos','Maestros','maestros'],
     ['HU-M0-036','Aceptación de términos y tratamiento de datos','Primer ingreso de cperez; Términos y datos','terminos']
   ];
@@ -1072,6 +1087,7 @@ function vDemo(){
         <section class="card"><div class="card-h"><h2 class="h2">Pruebas sugeridas</h2></div><div class="card-b"><ol class="steps">
           <li>Entre como <b class="mono">cperez</b> con su cédula: acepta los términos y crea su clave.</li>
           <li>Falle 5 veces la clave de <b class="mono">jramirez</b> y luego desbloquéelo como <b class="mono">lmendez</b>.</li>
+          <li>En el ingreso, use «¿Olvidó su clave?» con <b class="mono">jramirez</b>; entre como <b class="mono">lmendez</b> y atienda la solicitud en Usuarios. jramirez entra con su cédula y crea una clave nueva.</li>
           <li>Cree a Mario Gómez Castro con rol Extrusor: el sistema propone <b class="mono">mgomezc</b> porque <span class="mono">mgomez</span> ya existe.</li>
           <li>En Turnos, simule Extrusor a las 05:40 y Perfilador a la 01:00.</li>
           <li>Anule <span class="mono">RC-2026-0412</span> y vea la reversión de inventario.</li>
@@ -1079,7 +1095,7 @@ function vDemo(){
           <li>Ponga la inactividad en 1 minuto y espere.</li></ol></div></section>
         <section class="card"><div class="card-h"><h2 class="h2">Qué es simulado</h2></div><div class="card-b stack">
           <p>Los registros de recepción, extrusión, perfilado y despacho, y los consolidados de turno, son de ejemplo: los aportan M1 a M5.</p>
-          <p>La recuperación de clave por correo no envía correos. La carga inicial desde la plantilla no está incluida.</p>
+          <p>El aviso por correo al Administrador no se envía: la solicitud aparece en Usuarios. La carga inicial desde la plantilla no está incluida.</p>
           <p>Nombres, cédulas, clientes y proveedores son inventados. Los calibres y pesos del tubo son los confirmados por ASLAN.</p>
           <p>La exportación de la bitácora, la auditoría y las aceptaciones genera un archivo de Excel real.</p></div></section>
       </div>
@@ -1098,8 +1114,9 @@ function vModal(){
     return shell(esc(d.titulo), `Versión ${esc(d.version)} · vigente desde ${fmtYmd(d.vigencia)}`, `<div class="modal-b"><div class="doc">${body}</div></div>`, `<button class="btn primary" data-act="cerrar">Volver</button>`, true);
   }
   if(m.t==='olvide'){
-    if(m.enviado) return shell('Recuperar la clave','',`<div class="modal-b"><div class="msg info">Si el usuario existe y tiene correo registrado, le enviamos un enlace para crear una clave nueva. Si no tiene correo, pida al Administrador que restablezca su clave.</div><p class="fine">En el demo no se envía ningún correo; la solicitud queda en la bitácora.</p></div>`,`<button class="btn primary" data-act="cerrar">Entendido</button>`);
-    return shell('Recuperar la clave','',`<form class="modal-b" data-form="olvide" id="fm-olvide"><label class="field"><span>Usuario</span><input class="input" name="usuario" id="ol-u" autocapitalize="none"></label><p class="fine">Le enviaremos un enlace al correo registrado.</p></form>`,`<button class="btn" data-act="cerrar">Cancelar</button><button class="btn primary" type="submit" form="fm-olvide">Enviar enlace</button>`);
+    if(m.limite) return shell('Recuperar la clave','',`<div class="modal-b"><div class="msg warn">Ya se enviaron varias solicitudes para este usuario en la última hora. Espere o comuníquese directamente con el Administrador.</div><p class="fine">El sistema acepta hasta 3 solicitudes por usuario cada hora.</p></div>`,`<button class="btn primary" data-act="cerrar">Entendido</button>`);
+    if(m.enviado) return shell('Recuperar la clave','',`<div class="modal-b"><div class="msg info">Le avisamos al Administrador. Él lo contactará para restablecer su clave.</div><p class="fine">El Administrador recibe el aviso por correo y en su panel. En el demo no se envía el correo: la solicitud aparece en Usuarios.</p></div>`,`<button class="btn primary" data-act="cerrar">Entendido</button>`);
+    return shell('Recuperar la clave','',`<form class="modal-b" data-form="olvide" id="fm-olvide"><label class="field"><span>Usuario</span><input class="input" name="usuario" id="ol-u" autocapitalize="none" required></label><p class="fine">Le avisaremos al Administrador para que restablezca su clave. No necesita correo.</p></form>`,`<button class="btn" data-act="cerrar">Cancelar</button><button class="btn primary" type="submit" form="fm-olvide">Avisar al Administrador</button>`);
   }
   if(m.t==='estacion'){
     return shell('Estación de esta terminal','Demo',`<form class="modal-b" data-form="estacion" id="fm-est"><p class="muted">En la planta cada terminal se registra una sola vez, al instalarla. Aquí puede cambiarla para ver cómo queda en la bitácora.</p><label class="field"><span>Estación</span><select class="input" name="est" id="est-sel">${S.estaciones.map(e => `<option value="${e.id}" ${e.id===S.terminal?'selected':''}>${esc(e.nombre)}</option>`).join('')}</select></label></form>`,`<button class="btn" data-act="cerrar">Cancelar</button><button class="btn primary" type="submit" form="fm-est">Guardar</button>`);
@@ -1126,7 +1143,7 @@ function vModal(){
   }
   if(m.t==='reset'){
     const u = S.usuarios.find(x => x.id===m.id);
-    return shell(`Restablecer la clave de ${esc(shortName(u))}`,'Usuarios',`<div class="modal-b"><p>La clave vuelve a ser la cédula (${cedula(u.cedula)}) y ${esc(u.nombre.split(' ')[0])} debe cambiarla en su siguiente ingreso. Use esta opción cuando la persona no tiene correo para recuperar la clave.</p></div>`,`<button class="btn" data-act="cerrar">Cancelar</button><button class="btn primary" data-act="resetOk" data-id="${u.id}">Restablecer</button>`);
+    return shell(`Restablecer la clave de ${esc(shortName(u))}`,'Usuarios',`<div class="modal-b"><p>La clave vuelve a ser la cédula (${cedula(u.cedula)}) y ${esc(u.nombre.split(' ')[0])} debe cambiarla en su siguiente ingreso. Verifique antes la identidad de la persona. Si estaba bloqueada por intentos, también queda desbloqueada.</p>${S.solicitudes.some(x => x.usuario===u.usuario && x.estado==='pendiente') ? '<div class="msg info">Esto atiende su solicitud de recuperación pendiente.</div>' : ''}</div>`,`<button class="btn" data-act="cerrar">Cancelar</button><button class="btn primary" data-act="resetOk" data-id="${u.id}">Restablecer</button>`);
   }
   if(m.t==='turno'){
     const t = m.id ? S.turnos.find(x => x.id===m.id) : {rol:m.rol||'perfilador', nombre:'', inicio:'06:00', fin:'14:00'};
@@ -1278,7 +1295,19 @@ const ACT = {
   },
   desbloquear: d => { const u = S.usuarios.find(x => x.id===d.id); for(const k in S.intentos) if(k.startsWith(u.usuario+'|')) delete S.intentos[k]; bit('Desbloqueo de usuario','Usuarios',u.usuario); aud('Usuarios',u.usuario,'Bloqueo','Bloqueado','Desbloqueado',''); save(); render(); toast(`${shortName(u)} puede entrar de nuevo.`); },
   reactivar: d => { const u = S.usuarios.find(x => x.id===d.id); u.estado = 'activo'; const baja = u.baja; u.baja = null; aud('Usuarios',u.usuario,'Estado','Inactivo','Activo',''); bit('Reactivación de usuario','Usuarios',u.usuario+' · baja anterior '+fmtTs(baja)); save(); render(); toast(`${shortName(u)} está activo de nuevo.`); },
-  resetOk: d => { const u = S.usuarios.find(x => x.id===d.id); u.hash = pwHash(u.usuario, u.cedula); u.debeCambiar = true; u.reset = true; aud('Usuarios',u.usuario,'Clave','(oculta)','Restablecida a la cédula',''); bit('Restablecimiento de clave','Usuarios',u.usuario); save(); closeModal(); toast('Clave restablecida. Debe cambiarla al entrar.'); },
+  resetOk: d => {
+    const u = S.usuarios.find(x => x.id===d.id); u.hash = pwHash(u.usuario, u.cedula); u.debeCambiar = true; u.reset = true;
+    for(const k in S.intentos) if(k.startsWith(u.usuario+'|')) delete S.intentos[k];
+    const sol = S.solicitudes.filter(x => x.usuario===u.usuario && x.estado==='pendiente');
+    sol.forEach(x => { x.estado = 'atendida'; x.por = me().usuario; x.fin = nowIso(); });
+    aud('Usuarios',u.usuario,'Clave','(oculta)','Restablecida a la cédula', sol.length ? 'Solicitud de recuperación' : '');
+    bit('Restablecimiento de clave','Usuarios', sol.length ? u.usuario+' · atiende la solicitud de recuperación' : u.usuario);
+    save(); closeModal(); toast('Clave restablecida a la cédula. Debe cambiarla al entrar.');
+  },
+  descartarSol: d => {
+    const x = S.solicitudes.find(y => y.id===d.s); x.estado = 'descartada'; x.por = me().usuario; x.fin = nowIso();
+    bit('Solicitud de recuperación descartada','Usuarios', x.usuario); save(); render(); toast('Solicitud descartada.');
+  },
   toggleTurno: d => {
     const t = S.turnos.find(x => x.id===d.id);
     if(t.estado!=='activo'){ const o = solapa(t.rol, t.inicio, t.fin, t.id); if(o){ toast(`No se puede activar: se cruza con ${o.nombre} (${o.inicio}–${o.fin}).`, 'bad'); return; } }
@@ -1310,7 +1339,24 @@ const FORMS = {
     u.hash = pwHash(u.usuario, fd.get('p1')); u.debeCambiar = false; u.claveCreada = true; delete u.reset; ui.msg = null;
     bit('Cambio de clave','Seguridad', 'Clave propia creada en el ingreso', u.usuario); save(); startSession(u);
   },
-  olvide: fd => { const un = norm(fd.get('usuario')); bit('Solicitud de recuperación de clave','Seguridad', userBy(un) && userBy(un).correo ? 'Enlace enviado al correo registrado (simulado)' : 'Usuario sin correo o inexistente: debe restablecerla el Administrador', un||'—'); save(); ui.modal = {t:'olvide', enviado:true}; render(); },
+  olvide: fd => {
+    const un = norm(fd.get('usuario')); if(!un) return;
+    const desde = Date.now() - 3600e3;
+    if(S.recupLog.filter(x => x.u===un && Date.parse(x.ts) > desde).length >= 3){
+      bit('Solicitud de recuperación rechazada','Seguridad','Más de 3 solicitudes en una hora (respuesta 429)', un); save(); ui.modal = {t:'olvide', limite:true}; return render();
+    }
+    S.recupLog.push({u:un, ts:nowIso()});
+    const u = userBy(un);
+    if(u && u.estado==='activo'){
+      const p = S.solicitudes.find(x => x.usuario===un && x.estado==='pendiente');
+      if(p){ p.ts = nowIso(); p.estacion = estNombre(); p.veces = (p.veces||1) + 1; }
+      else S.solicitudes.unshift({id:'s'+(++S.seq), usuario:un, estacion:estNombre(), ts:nowIso(), estado:'pendiente'});
+      bit('Solicitud de recuperación de clave','Seguridad','Aviso al Administrador por correo y en su panel (simulado)', un);
+    } else {
+      bit('Solicitud de recuperación de clave','Seguridad','Usuario inexistente o inactivo: no se crea solicitud; la pantalla responde igual', un);
+    }
+    save(); ui.modal = {t:'olvide', enviado:true}; render();
+  },
   estacion: fd => { const prev = estNombre(); S.terminal = fd.get('est'); bit('Cambio de estación de la terminal','Parámetros',`${prev} → ${estNombre()}`); save(); closeModal(); toast('Esta terminal ahora es '+estNombre()+'.'); },
   nuevaEst: fd => { const n = String(fd.get('nombre')||'').trim(); if(!n){ ui.err = {nombre:'Escriba el nombre.'}; return render(); } if(S.estaciones.some(e => norm(e.nombre)===norm(n))){ ui.err = {nombre:'Ya existe una estación con ese nombre.'}; return render(); } S.estaciones.push({id:'e'+(++S.seq), nombre:n}); aud('Parámetros','Estaciones','Nueva estación','—',n,''); bit('Registro de terminal','Parámetros',n); save(); closeModal(); toast('Terminal registrada.'); },
   usuario: fd => {
@@ -1321,6 +1367,7 @@ const FORMS = {
     if(v.correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.correo)) e.correo = 'Revise el correo.';
     if(!/^[a-z][a-z0-9]{2,19}$/.test(v.usuario)) e.usuario = 'Solo letras y números, sin espacios.'; else if(S.usuarios.some(u => u.usuario===v.usuario)) e.usuario = 'Ese usuario ya existe.';
     if(!v.roles.length) e.roles = 'Asigne al menos un rol.';
+    if(v.roles.includes('admin') && !v.correo && !e.correo) e.correo = 'El Administrador debe tener correo: recibe los avisos de recuperación de clave.';
     if(Object.keys(e).length){ ui.err = e; ui.modal.v = v; return render(); }
     const u = {id:'u'+(++S.seq), nombre:v.nombre, ap1:v.ap1, ap2:v.ap2, cedula:v.cedula, correo:v.correo, usuario:v.usuario, roles:v.roles, estado:'activo', alta:nowIso(), baja:null, hash:pwHash(v.usuario, v.cedula), debeCambiar:true, ultimo:null};
     S.usuarios.push(u);
@@ -1332,6 +1379,7 @@ const FORMS = {
     const u = S.usuarios.find(x => x.id===ui.modal.id); let sel = fd.getAll('roles');
     if(u.id===S.session.userId && !sel.includes('admin')) sel.push('admin');
     if(!sel.length){ ui.err = {roles:'Asigne al menos un rol.'}; ui.modal.sel = sel; return render(); }
+    if(sel.includes('admin') && !u.roles.includes('admin') && !u.correo){ ui.err = {roles:'Para ser Administrador la persona debe tener correo: recibe los avisos de recuperación de clave.'}; ui.modal.sel = sel; return render(); }
     const add = sel.filter(r => !u.roles.includes(r)), rem = u.roles.filter(r => !sel.includes(r));
     add.forEach(r => { aud('Usuarios', u.usuario, 'Rol asignado', '—', rolNom(r), ''); bit('Asignación de rol','Roles',`${u.usuario} · ${rolNom(r)}`); });
     rem.forEach(r => { aud('Usuarios', u.usuario, 'Rol retirado', rolNom(r), '—', ''); bit('Retiro de rol','Roles',`${u.usuario} · ${rolNom(r)}`); });
